@@ -1,8 +1,15 @@
 import folium
 
 def create_map():
-    # Создаем базовую карту мира
-    my_map = folium.Map(location=[20, 0], zoom_start=2, tiles="CartoDB positron")
+    # Создаем базовую карту мира, используя тайлы Google Maps на русском языке
+    google_ru_tiles = "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=ru"
+    
+    my_map = folium.Map(
+        location=[20, 0], 
+        zoom_start=2, 
+        tiles=google_ru_tiles, 
+        attr="Google Maps" # Обязательный параметр авторства при использовании сторонних тайлов
+    )
 
     # --- ДОБАВЛЯЕМ ПОЛУОСТРОВА ---
     # Словарь с названиями полуостровов и их примерными координатами [широта, долгота]
@@ -30,7 +37,8 @@ def create_map():
             location=coords,
             popup=f"<b>Полуостров {name}</b>",
             tooltip=name,
-            icon=folium.Icon(color="blue", icon="info-sign")
+            # Изменили цвет маркера на фиолетовый ('purple')
+            icon=folium.Icon(color="purple", icon="info-sign")
         ).add_to(my_map)
 
     # Сохраняем результат
