@@ -1,14 +1,14 @@
 import folium
 
 def create_russia_map():
-# Замени букву 'm' на 'p' (от слова physical/terrain) в параметре lyrs
-    google_ru_tiles = "https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}&hl=ru"
+# Карта от National Geographic
+    natgeo_tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}"
     
     my_map = folium.Map(
         location=[61.5, 90.0], 
         zoom_start=3, 
-        tiles=google_ru_tiles, 
-        attr="Google Terrain" # тут тоже можешь поменять название для красоты
+        tiles=natgeo_tiles, 
+        attr="Esri National Geographic"
     )
 
     # --- ВОДНЫЕ ОБЪЕКТЫ (СИНИЙ ЦВЕТ) ---
