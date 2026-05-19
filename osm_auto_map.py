@@ -5,14 +5,13 @@ import time
 def fetch_data(search_query, need_polygon=False):
     """Отправляем запрос к OSM. Если need_polygon=True, просим форму русла."""
     url = "https://nominatim.openstreetmap.org/search"
-    headers = {'User-Agent': 'SchoolGeographyHomeworkBot/3.0'}
+    headers = {'User-Agent': 'SchoolGeographyHomeworkBot/4.0'}
     params = {
         'q': search_query,
         'format': 'json',
         'limit': 1
     }
     
-    # Если это река, просим сервер вернуть сжатую линию
     if need_polygon:
         params['polygon_geojson'] = 1
         params['polygon_threshold'] = 0.05 
@@ -27,8 +26,8 @@ def fetch_data(search_query, need_polygon=False):
         
     return None
 
-def create_natgeo_final_map():
-    print("🚀 Создаем финальную карту в стиле National Geographic...")
+def create_natgeo_ultimate_map():
+    print("🚀 Создаем полную карту со всеми объектами (National Geographic)...")
     
     # Подложка National Geographic
     natgeo_tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}"
@@ -41,10 +40,13 @@ def create_natgeo_final_map():
     )
 
     places = [
+        # --- ГОРЫ (Красный) ---
         "Алтайские горы, Россия", "горы Бырранга", "Верхоянский хребет", "Восточный Саян", 
         "хребет Джугджур", "Западный Саян", "Кавказские горы", "Колымское нагорье", 
         "Корякское нагорье", "хребет Сихотэ-Алинь", "Становое нагорье", "Уральские горы, Россия", 
         "Чукотское нагорье", "Среднесибирское плоскогорье", "гора Эльбрус",
+        
+        # --- ВОДА (Синий) ---
         "река Ангара", "река Амур", "река Волга", "река Дон", "река Енисей", 
         "река Индигирка", "река Иртыш", "река Колыма", "река Кубань", "река Лена", 
         "река Обь", "река Печора", "река Северная Двина",
@@ -54,10 +56,28 @@ def create_natgeo_final_map():
         "озеро Байкал", "Ладожское озеро", "Онежское озеро", "озеро Таймыр", "озеро Ханка",
         "Анадырский залив", "Енисейский залив", "Обская губа", "Финский залив", "залив Шелихова",
         "Берингов пролив", "пролив Карские Ворота", "Керченский пролив", "пролив Лаперуза", 
-        "пролив Дмитрия Лаптева", "пролив Лонга", "Татарский пролив"
+        "пролив Дмитрия Лаптева", "пролив Лонга", "Татарский пролив",
+        
+        # --- НОВЫЕ: ОСТРОВА И ПОЛУОСТРОВА (Черный) ---
+        "остров Врангеля", "архипелаг Земля Франца-Иосифа", "Курильские острова",
+        "архипелаг Новая Земля", "остров Сахалин", "архипелаг Северная Земля",
+        "Гыданский полуостров", "полуостров Камчатка", "полуостров Канин",
+        "Кольский полуостров", "Крымский полуостров", "полуостров Таймыр",
+        "Чукотский полуостров", "полуостров Ямал",
+        
+        # --- НОВЫЕ: РАВНИНЫ И НИЗМЕННОСТИ (Зеленый) ---
+        "Восточно-Европейская равнина", "Западно-Сибирская равнина",
+        "Прикаспийская низменность", "Северо-Сибирская низменность",
+        "Колымская низменность", "Среднерусская возвышенность",
+        "Северные Увалы", "Тиманский кряж", "Енисейский кряж"
     ]
 
-    words_to_remove = ["горы", "гора", "хребет", "река", "озеро", "море", "залив", "пролив", "губа", "нагорье", "плоскогорье", "россия"]
+    # Расширенный список слов для запасного поиска
+    words_to_remove = [
+        "горы", "гора", "хребет", "река", "озеро", "море", "залив", "пролив", "губа", 
+        "нагорье", "плоскогорье", "россия", "остров", "полуостров", "архипелаг", 
+        "земля", "равнина", "низменность", "возвышенность", "увалы", "кряж"
+    ]
 
     for name in places:
         is_river_query = "река" in name.lower()
@@ -74,15 +94,23 @@ def create_natgeo_final_map():
         
         if result_data:
             clean_name = name.replace(", Россия", "")
+            name_lower = name.lower()
             
-            is_water = any(word in clean_name.lower() for word in ["река", "море", "озеро", "залив", "пролив", "губа"])
-            is_river = "река" in clean_name.lower()
-            marker_color = "blue" if is_water else "red"
+            # Умное определение цвета по ТЗ
+            if any(w in name_lower for w in ["река", "море", "озеро", "залив", "пролив", "губа"]):
+                marker_color = "blue"
+            elif any(w in name_lower for w in ["остров", "полуостров", "архипелаг", "земля"]):
+                marker_color = "black"
+            elif any(w in name_lower for w in ["равнина", "низменность", "возвышенность", "увалы", "кряж"]):
+                marker_color = "green"
+            else:
+                marker_color = "red" # Горы по умолчанию
             
             geom = result_data.get('geojson', {})
             geom_type = geom.get('type', 'Point')
 
-            if is_river and geom_type in ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon']:
+            # Полигоны только для рек
+            if is_river_query and geom_type in ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon']:
                 folium.GeoJson(
                     geom,
                     name=clean_name,
@@ -90,8 +118,8 @@ def create_natgeo_final_map():
                     style_function=lambda x, c=marker_color: {'color': c, 'weight': 4, 'fillOpacity': 0.3}
                 ).add_to(my_map)
                 print(f"🌊 Нарисовано русло реки: {clean_name}")
-            
             else:
+                # Маркеры для всего остального
                 lat, lon = float(result_data['lat']), float(result_data['lon'])
                 folium.Marker(
                     location=[lat, lon],
@@ -99,13 +127,13 @@ def create_natgeo_final_map():
                     tooltip=clean_name,
                     icon=folium.Icon(color=marker_color, icon="info-sign")
                 ).add_to(my_map)
-                print(f"📍 Поставлена метка: {clean_name}")
+                print(f"📍 Поставлена метка ({marker_color}): {clean_name}")
                 
         else:
             print(f"❌ Не удалось найти: {name}")
 
-    output_file = "natgeo_geography_map.html"
+    output_file = "natgeo_geography_ultimate_map.html"
     my_map.save(output_file)
-    print(f"\n🎉 КРАСОТА НАВЕДЕНА! Карта сохранена в {output_file}.")
+    print(f"\n🎉 ГОТОВО! Ультимативная карта сохранена в {output_file}.")
 
-create_natgeo_final_map()
+create_natgeo_ultimate_map()
