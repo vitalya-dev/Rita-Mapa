@@ -2,30 +2,32 @@ import folium
 import requests
 import time
 
-def fetch_coordinates(search_query):
-    """Отправляет запрос к OpenStreetMap и возвращает (широту, долготу) или (None, None)"""
+def fetch_data(search_query):
+    """Отправляем запрос к OSM и просим вернуть полную форму объекта (линию русла или границы)"""
     url = "https://nominatim.openstreetmap.org/search"
-    headers = {'User-Agent': 'SchoolGeographyHomeworkBot/1.5'}
+    headers = {'User-Agent': 'SchoolGeographyHomeworkBot/2.0'}
     params = {
         'q': search_query,
         'format': 'json',
-        'limit': 1
+        'limit': 1,
+        'polygon_geojson': 1,
+        'polygon_threshold': 0.05  # 👈 Тот самый секретный параметр для получения контуров!
     }
     
     try:
         response = requests.get(url, params=params, headers=headers)
         data = response.json()
         if data:
-            return float(data[0]['lat']), float(data[0]['lon'])
+            return data[0] # Возвращаем первый найденный объект целиком
     except Exception as e:
         print(f"⚠️ Ошибка сети при поиске '{search_query}': {e}")
         
-    return None, None
+    return None
 
-def create_osm_auto_map():
-    print("🚀 Создаем карту и начинаем умный поиск объектов... Подожди минутку!")
+def create_osm_pro_map():
+    print("🚀 Создаем PRO-карту: загружаем русла рек и границы морей... Подожди минутку!")
     
-    # Топографическая подложка
+    # Топографическая подложка (хорошо видны высоты)
     topo_tiles = "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
     my_map = folium.Map(location=[61.5, 90.0], zoom_start=3, tiles=topo_tiles, attr="OpenTopoMap")
 
@@ -46,54 +48,62 @@ def create_osm_auto_map():
         "пролив Дмитрия Лаптева", "пролив Лонга", "Татарский пролив"
     ]
 
-    # Список слов-паразитов, которые мы будем отрезать, если поиск не удался
-    words_to_remove = [
-        "горы", "гора", "хребет", "река", "озеро", "море", 
-        "залив", "пролив", "губа", "нагорье", "плоскогорье", "россия"
-    ]
+    # Слова для обрезки (наш запасной план)
+    words_to_remove = ["горы", "гора", "хребет", "река", "озеро", "море", "залив", "пролив", "губа", "нагорье", "плоскогорье", "россия"]
 
     for name in places:
-        # 1. Попытка №1: Ищем как есть
-        lat, lon = fetch_coordinates(name)
-        time.sleep(1.5) # Обязательная пауза!
+        result_data = fetch_data(name)
+        time.sleep(1.5) # Не забываем про паузу для сервера
         
-        # 2. Попытка №2: Если не нашли, включаем запасной план
-        if lat is None:
-            # Разбиваем строку на слова, выкидываем слова-паразиты и склеиваем обратно
-            fallback_name = " ".join([
-                w for w in name.split() 
-                if w.lower().replace(',', '') not in words_to_remove
-            ])
-            
-            # Если после очистки что-то осталось (например "Бырранга"), ищем снова
+        # Если не нашли, отрезаем лишние слова и ищем снова
+        if not result_data:
+            fallback_name = " ".join([w for w in name.split() if w.lower().replace(',', '') not in words_to_remove])
             if fallback_name and fallback_name != name:
                 print(f"🔄 Уточняем поиск: '{name}' -> ищем просто '{fallback_name}'...")
-                lat, lon = fetch_coordinates(fallback_name)
-                time.sleep(1.5) # Снова пауза после запроса
+                result_data = fetch_data(fallback_name)
+                time.sleep(1.5)
         
-        # 3. Финальная проверка: ставим маркер, если координаты нашлись
-        if lat is not None:
-            clean_name = name.replace(", Россия", "") # Чистим для красивой всплывашки
+        # Если наконец что-то нашли
+        if result_data:
+            clean_name = name.replace(", Россия", "")
             
-            # Определяем цвет маркера по оригинальному названию
+            # Определяем цвет по названию
             is_water = any(word in clean_name.lower() for word in ["река", "море", "озеро", "залив", "пролив", "губа"])
             marker_color = "blue" if is_water else "red"
             
-            folium.Marker(
-                location=[lat, lon],
-                popup=f"<b>{clean_name}</b>",
-                tooltip=clean_name,
-                icon=folium.Icon(color=marker_color, icon="info-sign")
-            ).add_to(my_map)
+            # Достаем геометрию. Если её нет, считаем, что это точка
+            geom = result_data.get('geojson', {})
+            geom_type = geom.get('type', 'Point')
+
+            if geom_type in ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon']:
+                # 🔥 МАГИЯ: Рисуем извилистую реку или закрашиваем море!
+                # Передаем цвет в лямбда-функцию, чтобы линии раскрашивались правильно
+                folium.GeoJson(
+                    geom,
+                    name=clean_name,
+                    tooltip=clean_name,
+                    style_function=lambda x, c=marker_color: {'color': c, 'weight': 5, 'fillOpacity': 0.3}
+                ).add_to(my_map)
+                print(f"🌊 Нарисована линия/форма ({geom_type}): {clean_name}")
             
-            print(f"✅ Найдено: {clean_name}")
+            else:
+                # 📍 Классический маркер, если форма неизвестна или это вулкан (точка)
+                lat, lon = float(result_data['lat']), float(result_data['lon'])
+                folium.Marker(
+                    location=[lat, lon],
+                    popup=f"<b>{clean_name}</b>",
+                    tooltip=clean_name,
+                    icon=folium.Icon(color=marker_color, icon="info-sign")
+                ).add_to(my_map)
+                print(f"📍 Поставлена точка: {clean_name}")
+                
         else:
-            print(f"❌ Провал: не удалось найти даже по запасному варианту: {name}")
+            print(f"❌ Провал: не удалось найти в базе: {name}")
 
-    # Сохраняем готовую карту
-    output_file = "osm_geography_map_smart.html"
+    # Сохраняем карту
+    output_file = "osm_geography_map_pro.html"
     my_map.save(output_file)
-    print(f"\n🎉 ГОТОВО! Карта сохранена в файл {output_file}.")
+    print(f"\n🎉 ГОТОВО! PRO-карта сохранена в файл {output_file}. Скорей открывай!")
 
-# Запуск
-create_osm_auto_map()
+# Запускаем
+create_osm_pro_map()
