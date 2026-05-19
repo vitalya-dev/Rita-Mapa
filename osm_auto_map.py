@@ -2,14 +2,33 @@ import folium
 import requests
 import time
 
-def create_osm_auto_map():
-    print("Создаем карту и начинаем поиск объектов... Придется подождать около минуты!")
+def fetch_coordinates(search_query):
+    """Отправляет запрос к OpenStreetMap и возвращает (широту, долготу) или (None, None)"""
+    url = "https://nominatim.openstreetmap.org/search"
+    headers = {'User-Agent': 'SchoolGeographyHomeworkBot/1.5'}
+    params = {
+        'q': search_query,
+        'format': 'json',
+        'limit': 1
+    }
     
-    # Создаем карту с рельефом (открытая топографическая карта, отлично для географии)
+    try:
+        response = requests.get(url, params=params, headers=headers)
+        data = response.json()
+        if data:
+            return float(data[0]['lat']), float(data[0]['lon'])
+    except Exception as e:
+        print(f"⚠️ Ошибка сети при поиске '{search_query}': {e}")
+        
+    return None, None
+
+def create_osm_auto_map():
+    print("🚀 Создаем карту и начинаем умный поиск объектов... Подожди минутку!")
+    
+    # Топографическая подложка
     topo_tiles = "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
     my_map = folium.Map(location=[61.5, 90.0], zoom_start=3, tiles=topo_tiles, attr="OpenTopoMap")
 
-    # Наши объекты (добавил слово 'Россия' к некоторым, чтобы поиск не улетел в другие страны)
     places = [
         "Алтайские горы, Россия", "горы Бырранга", "Верхоянский хребет", "Восточный Саян", 
         "хребет Джугджур", "Западный Саян", "Кавказские горы", "Колымское нагорье", 
@@ -27,59 +46,54 @@ def create_osm_auto_map():
         "пролив Дмитрия Лаптева", "пролив Лонга", "Татарский пролив"
     ]
 
-    # Адрес бесплатного поисковика OpenStreetMap
-    url = "https://nominatim.openstreetmap.org/search"
-    
-    # OSM требует указывать, кто делает запрос. Придумаем название нашему "приложению"
-    headers = {'User-Agent': 'SchoolGeographyHomeworkBot/1.0'}
+    # Список слов-паразитов, которые мы будем отрезать, если поиск не удался
+    words_to_remove = [
+        "горы", "гора", "хребет", "река", "озеро", "море", 
+        "залив", "пролив", "губа", "нагорье", "плоскогорье", "россия"
+    ]
 
     for name in places:
-        # Параметры запроса: ищем название, просим формат JSON, берем только 1 лучший результат
-        params = {
-            'q': name,
-            'format': 'json',
-            'limit': 1
-        }
+        # 1. Попытка №1: Ищем как есть
+        lat, lon = fetch_coordinates(name)
+        time.sleep(1.5) # Обязательная пауза!
         
-        try:
-            # Отправляем запрос
-            response = requests.get(url, params=params, headers=headers)
-            data = response.json()
+        # 2. Попытка №2: Если не нашли, включаем запасной план
+        if lat is None:
+            # Разбиваем строку на слова, выкидываем слова-паразиты и склеиваем обратно
+            fallback_name = " ".join([
+                w for w in name.split() 
+                if w.lower().replace(',', '') not in words_to_remove
+            ])
             
-            if data:
-                # Берем координаты из ответа (они приходят в виде строк, переводим в числа)
-                lat = float(data[0]['lat'])
-                lon = float(data[0]['lon'])
-                
-                # Чистим название от слова ", Россия" для красивой подсказки
-                clean_name = name.replace(", Россия", "")
-                
-                # Логика цветов: ищем ключевые слова воды
-                is_water = any(word in clean_name.lower() for word in ["река", "море", "озеро", "залив", "пролив", "губа"])
-                marker_color = "blue" if is_water else "red"
-                
-                # Ставим маркер на карту
-                folium.Marker(
-                    location=[lat, lon],
-                    popup=f"<b>{clean_name}</b>",
-                    tooltip=clean_name,
-                    icon=folium.Icon(color=marker_color, icon="info-sign")
-                ).add_to(my_map)
-                
-                print(f"✅ Найдено: {clean_name} ({lat}, {lon})")
-            else:
-                print(f"❌ Не удалось найти: {name}")
-                
-        except Exception as e:
-            print(f"⚠️ Ошибка при поиске '{name}': {e}")
+            # Если после очистки что-то осталось (например "Бырранга"), ищем снова
+            if fallback_name and fallback_name != name:
+                print(f"🔄 Уточняем поиск: '{name}' -> ищем просто '{fallback_name}'...")
+                lat, lon = fetch_coordinates(fallback_name)
+                time.sleep(1.5) # Снова пауза после запроса
+        
+        # 3. Финальная проверка: ставим маркер, если координаты нашлись
+        if lat is not None:
+            clean_name = name.replace(", Россия", "") # Чистим для красивой всплывашки
             
-        # САМОЕ ВАЖНОЕ: спим 1.5 секунды, чтобы нас не забанил сервер OSM!
-        time.sleep(1.5)
+            # Определяем цвет маркера по оригинальному названию
+            is_water = any(word in clean_name.lower() for word in ["река", "море", "озеро", "залив", "пролив", "губа"])
+            marker_color = "blue" if is_water else "red"
+            
+            folium.Marker(
+                location=[lat, lon],
+                popup=f"<b>{clean_name}</b>",
+                tooltip=clean_name,
+                icon=folium.Icon(color=marker_color, icon="info-sign")
+            ).add_to(my_map)
+            
+            print(f"✅ Найдено: {clean_name}")
+        else:
+            print(f"❌ Провал: не удалось найти даже по запасному варианту: {name}")
 
-    # Сохраняем карту
-    output_file = "osm_geography_map.html"
+    # Сохраняем готовую карту
+    output_file = "osm_geography_map_smart.html"
     my_map.save(output_file)
-    print(f"\n🎉 ГОТОВО! Карта сохранена в файл {output_file}. Открывай в браузере!")
+    print(f"\n🎉 ГОТОВО! Карта сохранена в файл {output_file}.")
 
-# Запускаем скрипт
+# Запуск
 create_osm_auto_map()
