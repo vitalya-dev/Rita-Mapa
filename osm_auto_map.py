@@ -3,9 +3,9 @@ import requests
 import time
 
 def fetch_data(search_query, need_polygon=False):
-    """Отправляем запрос к OSM. Если need_polygon=True, просим форму русла."""
+    """Отправляем запрос к OSM. Если need_polygon=True, просим геометрию объекта."""
     url = "https://nominatim.openstreetmap.org/search"
-    headers = {'User-Agent': 'SchoolGeographyHomeworkBot/4.0'}
+    headers = {'User-Agent': 'SchoolGeographyHomeworkBot/5.0'}
     params = {
         'q': search_query,
         'format': 'json',
@@ -27,9 +27,8 @@ def fetch_data(search_query, need_polygon=False):
     return None
 
 def create_natgeo_ultimate_map():
-    print("🚀 Создаем полную карту со всеми объектами (National Geographic)...")
+    print("🚀 Создаем полную карту (National Geographic) с полигонами для равнин и рек...")
     
-    # Подложка National Geographic
     natgeo_tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}"
     
     my_map = folium.Map(
@@ -58,45 +57,47 @@ def create_natgeo_ultimate_map():
         "Берингов пролив", "пролив Карские Ворота", "Керченский пролив", "пролив Лаперуза", 
         "пролив Дмитрия Лаптева", "пролив Лонга", "Татарский пролив",
         
-        # --- НОВЫЕ: ОСТРОВА И ПОЛУОСТРОВА (Черный) ---
+        # --- ОСТРОВА И ПОЛУОСТРОВА (Черный) ---
         "остров Врангеля", "архипелаг Земля Франца-Иосифа", "Курильские острова",
-        "архипелаг Новая Земля", "остров Сахалин", "архипелаг Северная Земля",
+        "архипелаг Новая Земля", "Сахалин", "архипелаг Северная Земля",
         "Гыданский полуостров", "полуостров Камчатка", "полуостров Канин",
         "Кольский полуостров", "Крымский полуостров", "полуостров Таймыр",
         "Чукотский полуостров", "полуостров Ямал",
         
-        # --- НОВЫЕ: РАВНИНЫ И НИЗМЕННОСТИ (Зеленый) ---
+        # --- РАВНИНЫ И НИЗМЕННОСТИ (Зеленый) ---
         "Восточно-Европейская равнина", "Западно-Сибирская равнина",
         "Прикаспийская низменность", "Северо-Сибирская низменность",
         "Колымская низменность", "Среднерусская возвышенность",
         "Северные Увалы", "Тиманский кряж", "Енисейский кряж"
     ]
 
-    # Расширенный список слов для запасного поиска
+    # Убрали слово "земля", чтобы не ломать "Новую Землю"
     words_to_remove = [
         "горы", "гора", "хребет", "река", "озеро", "море", "залив", "пролив", "губа", 
         "нагорье", "плоскогорье", "россия", "остров", "полуостров", "архипелаг", 
-        "земля", "равнина", "низменность", "возвышенность", "увалы", "кряж"
+        "равнина", "низменность", "возвышенность", "увалы", "кряж"
     ]
 
     for name in places:
-        is_river_query = "река" in name.lower()
+        name_lower = name.lower()
         
-        result_data = fetch_data(name, need_polygon=is_river_query)
+        # Запрашиваем геометрию (полигоны) для рек, равнин, низменностей, возвышенностей и плоскогорий
+        is_polygon_query = any(w in name_lower for w in ["река", "равнина", "низменность", "возвышенность", "увалы", "кряж", "плоскогорье"])
+        
+        result_data = fetch_data(name, need_polygon=is_polygon_query)
         time.sleep(1.5)
         
         if not result_data:
             fallback_name = " ".join([w for w in name.split() if w.lower().replace(',', '') not in words_to_remove])
             if fallback_name and fallback_name != name:
                 print(f"🔄 Уточняем поиск: '{name}' -> ищем '{fallback_name}'...")
-                result_data = fetch_data(fallback_name, need_polygon=is_river_query)
+                result_data = fetch_data(fallback_name, need_polygon=is_polygon_query)
                 time.sleep(1.5)
         
         if result_data:
             clean_name = name.replace(", Россия", "")
-            name_lower = name.lower()
             
-            # Умное определение цвета по ТЗ
+            # Цвета по правилам контурной карты
             if any(w in name_lower for w in ["река", "море", "озеро", "залив", "пролив", "губа"]):
                 marker_color = "blue"
             elif any(w in name_lower for w in ["остров", "полуостров", "архипелаг", "земля"]):
@@ -104,22 +105,22 @@ def create_natgeo_ultimate_map():
             elif any(w in name_lower for w in ["равнина", "низменность", "возвышенность", "увалы", "кряж"]):
                 marker_color = "green"
             else:
-                marker_color = "red" # Горы по умолчанию
+                marker_color = "red" 
             
             geom = result_data.get('geojson', {})
             geom_type = geom.get('type', 'Point')
 
-            # Полигоны только для рек
-            if is_river_query and geom_type in ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon']:
+            # Рисуем полигон/линию, если сервер вернул фигуру
+            if is_polygon_query and geom_type in ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon']:
                 folium.GeoJson(
                     geom,
                     name=clean_name,
                     tooltip=clean_name,
                     style_function=lambda x, c=marker_color: {'color': c, 'weight': 4, 'fillOpacity': 0.3}
                 ).add_to(my_map)
-                print(f"🌊 Нарисовано русло реки: {clean_name}")
+                print(f"🌍 Нарисована область/линия ({marker_color}): {clean_name}")
             else:
-                # Маркеры для всего остального
+                # Если фигуру не дали (или мы не просили) — ставим маркер
                 lat, lon = float(result_data['lat']), float(result_data['lon'])
                 folium.Marker(
                     location=[lat, lon],
