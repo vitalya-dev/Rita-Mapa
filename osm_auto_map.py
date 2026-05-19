@@ -2,32 +2,35 @@ import folium
 import requests
 import time
 
-def fetch_data(search_query):
-    """Отправляем запрос к OSM и просим вернуть полную форму объекта (линию русла или границы)"""
+def fetch_data(search_query, need_polygon=False):
+    """Отправляем запрос к OSM. Если need_polygon=True, просим форму русла."""
     url = "https://nominatim.openstreetmap.org/search"
-    headers = {'User-Agent': 'SchoolGeographyHomeworkBot/2.0'}
+    headers = {'User-Agent': 'SchoolGeographyHomeworkBot/3.0'}
     params = {
         'q': search_query,
         'format': 'json',
-        'limit': 1,
-        'polygon_geojson': 1,
-        'polygon_threshold': 0.05  # 👈 Тот самый секретный параметр для получения контуров!
+        'limit': 1
     }
     
+    # Если это река, просим сервер вернуть сжатую линию
+    if need_polygon:
+        params['polygon_geojson'] = 1
+        params['polygon_threshold'] = 0.05 
+        
     try:
         response = requests.get(url, params=params, headers=headers)
         data = response.json()
         if data:
-            return data[0] # Возвращаем первый найденный объект целиком
+            return data[0]
     except Exception as e:
         print(f"⚠️ Ошибка сети при поиске '{search_query}': {e}")
         
     return None
 
-def create_osm_pro_map():
-    print("🚀 Создаем PRO-карту: загружаем русла рек и границы морей... Подожди минутку!")
+def create_osm_final_map():
+    print("🚀 Создаем финальную карту: русла для рек, точки для гор и морей...")
     
-    # Топографическая подложка (хорошо видны высоты)
+    # Подложка
     topo_tiles = "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
     my_map = folium.Map(location=[61.5, 90.0], zoom_start=3, tiles=topo_tiles, attr="OpenTopoMap")
 
@@ -48,46 +51,46 @@ def create_osm_pro_map():
         "пролив Дмитрия Лаптева", "пролив Лонга", "Татарский пролив"
     ]
 
-    # Слова для обрезки (наш запасной план)
     words_to_remove = ["горы", "гора", "хребет", "река", "озеро", "море", "залив", "пролив", "губа", "нагорье", "плоскогорье", "россия"]
 
     for name in places:
-        result_data = fetch_data(name)
-        time.sleep(1.5) # Не забываем про паузу для сервера
+        # Проверяем, река ли это, до отправки запроса
+        is_river_query = "река" in name.lower()
         
-        # Если не нашли, отрезаем лишние слова и ищем снова
+        result_data = fetch_data(name, need_polygon=is_river_query)
+        time.sleep(1.5)
+        
         if not result_data:
             fallback_name = " ".join([w for w in name.split() if w.lower().replace(',', '') not in words_to_remove])
             if fallback_name and fallback_name != name:
-                print(f"🔄 Уточняем поиск: '{name}' -> ищем просто '{fallback_name}'...")
-                result_data = fetch_data(fallback_name)
+                print(f"🔄 Уточняем поиск: '{name}' -> ищем '{fallback_name}'...")
+                # При запасном поиске тоже передаем флаг need_polygon
+                result_data = fetch_data(fallback_name, need_polygon=is_river_query)
                 time.sleep(1.5)
         
-        # Если наконец что-то нашли
         if result_data:
             clean_name = name.replace(", Россия", "")
             
-            # Определяем цвет по названию
+            # Определяем цвет и логику отрисовки
             is_water = any(word in clean_name.lower() for word in ["река", "море", "озеро", "залив", "пролив", "губа"])
+            is_river = "река" in clean_name.lower()
             marker_color = "blue" if is_water else "red"
             
-            # Достаем геометрию. Если её нет, считаем, что это точка
             geom = result_data.get('geojson', {})
             geom_type = geom.get('type', 'Point')
 
-            if geom_type in ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon']:
-                # 🔥 МАГИЯ: Рисуем извилистую реку или закрашиваем море!
-                # Передаем цвет в лямбда-функцию, чтобы линии раскрашивались правильно
+            # Рисуем полигон/линию ТОЛЬКО если это река и сервер вернул форму
+            if is_river and geom_type in ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon']:
                 folium.GeoJson(
                     geom,
                     name=clean_name,
                     tooltip=clean_name,
-                    style_function=lambda x, c=marker_color: {'color': c, 'weight': 5, 'fillOpacity': 0.3}
+                    style_function=lambda x, c=marker_color: {'color': c, 'weight': 4, 'fillOpacity': 0.3}
                 ).add_to(my_map)
-                print(f"🌊 Нарисована линия/форма ({geom_type}): {clean_name}")
+                print(f"🌊 Нарисовано русло реки: {clean_name}")
             
             else:
-                # 📍 Классический маркер, если форма неизвестна или это вулкан (точка)
+                # Для всего остального (моря, горы, озера) ставим классический маркер
                 lat, lon = float(result_data['lat']), float(result_data['lon'])
                 folium.Marker(
                     location=[lat, lon],
@@ -95,15 +98,13 @@ def create_osm_pro_map():
                     tooltip=clean_name,
                     icon=folium.Icon(color=marker_color, icon="info-sign")
                 ).add_to(my_map)
-                print(f"📍 Поставлена точка: {clean_name}")
+                print(f"📍 Поставлена метка: {clean_name}")
                 
         else:
-            print(f"❌ Провал: не удалось найти в базе: {name}")
+            print(f"❌ Не удалось найти: {name}")
 
-    # Сохраняем карту
-    output_file = "osm_geography_map_pro.html"
+    output_file = "osm_geography_final_map.html"
     my_map.save(output_file)
-    print(f"\n🎉 ГОТОВО! PRO-карта сохранена в файл {output_file}. Скорей открывай!")
+    print(f"\n🎉 ИДЕАЛЬНО! Карта сохранена в {output_file}. Удачной сдачи домашки!")
 
-# Запускаем
-create_osm_pro_map()
+create_osm_final_map()
