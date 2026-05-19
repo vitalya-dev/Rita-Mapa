@@ -27,12 +27,18 @@ def fetch_data(search_query, need_polygon=False):
         
     return None
 
-def create_osm_final_map():
-    print("🚀 Создаем финальную карту: русла для рек, точки для гор и морей...")
+def create_natgeo_final_map():
+    print("🚀 Создаем финальную карту в стиле National Geographic...")
     
-    # Подложка
-    topo_tiles = "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
-    my_map = folium.Map(location=[61.5, 90.0], zoom_start=3, tiles=topo_tiles, attr="OpenTopoMap")
+    # Подложка National Geographic
+    natgeo_tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}"
+    
+    my_map = folium.Map(
+        location=[61.5, 90.0], 
+        zoom_start=3, 
+        tiles=natgeo_tiles, 
+        attr="Esri National Geographic"
+    )
 
     places = [
         "Алтайские горы, Россия", "горы Бырранга", "Верхоянский хребет", "Восточный Саян", 
@@ -54,7 +60,6 @@ def create_osm_final_map():
     words_to_remove = ["горы", "гора", "хребет", "река", "озеро", "море", "залив", "пролив", "губа", "нагорье", "плоскогорье", "россия"]
 
     for name in places:
-        # Проверяем, река ли это, до отправки запроса
         is_river_query = "река" in name.lower()
         
         result_data = fetch_data(name, need_polygon=is_river_query)
@@ -64,14 +69,12 @@ def create_osm_final_map():
             fallback_name = " ".join([w for w in name.split() if w.lower().replace(',', '') not in words_to_remove])
             if fallback_name and fallback_name != name:
                 print(f"🔄 Уточняем поиск: '{name}' -> ищем '{fallback_name}'...")
-                # При запасном поиске тоже передаем флаг need_polygon
                 result_data = fetch_data(fallback_name, need_polygon=is_river_query)
                 time.sleep(1.5)
         
         if result_data:
             clean_name = name.replace(", Россия", "")
             
-            # Определяем цвет и логику отрисовки
             is_water = any(word in clean_name.lower() for word in ["река", "море", "озеро", "залив", "пролив", "губа"])
             is_river = "река" in clean_name.lower()
             marker_color = "blue" if is_water else "red"
@@ -79,7 +82,6 @@ def create_osm_final_map():
             geom = result_data.get('geojson', {})
             geom_type = geom.get('type', 'Point')
 
-            # Рисуем полигон/линию ТОЛЬКО если это река и сервер вернул форму
             if is_river and geom_type in ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon']:
                 folium.GeoJson(
                     geom,
@@ -90,7 +92,6 @@ def create_osm_final_map():
                 print(f"🌊 Нарисовано русло реки: {clean_name}")
             
             else:
-                # Для всего остального (моря, горы, озера) ставим классический маркер
                 lat, lon = float(result_data['lat']), float(result_data['lon'])
                 folium.Marker(
                     location=[lat, lon],
@@ -103,8 +104,8 @@ def create_osm_final_map():
         else:
             print(f"❌ Не удалось найти: {name}")
 
-    output_file = "osm_geography_final_map.html"
+    output_file = "natgeo_geography_map.html"
     my_map.save(output_file)
-    print(f"\n🎉 ИДЕАЛЬНО! Карта сохранена в {output_file}. Удачной сдачи домашки!")
+    print(f"\n🎉 КРАСОТА НАВЕДЕНА! Карта сохранена в {output_file}.")
 
-create_osm_final_map()
+create_natgeo_final_map()
